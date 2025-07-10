@@ -14,6 +14,97 @@
   ![MongoDB](https://img.shields.io/badge/MongoDB-Conversations-47A248.svg)
 
   <p>
+    <a href="#overview">Overview</a> •
+    <a href="#features">Features</a> •
+    <a href="#getting-started">Getting Started</a> •
+    <a href="#development">Development</a> •
+    <a href="#api-reference">API Reference</a>
+  </p>
+</div>
+
+## Overview
+
+ManipulatorAI is an intelligent AI-powered sales agent microservice that automatically engages with potential customers through social media interactions, guiding them through a natural conversation flow towards product interest and registration.
+
+## Features
+
+- 🤖 Automated customer engagement through social media
+- 💬 Natural, human-like conversations powered by Azure OpenAI
+- 🎯 Smart product matching and recommendations
+- 📊 Redis-based queue system for reliable processing
+- 🔄 Seamless handoff to Onboarding Agent
+- 📱 Facebook and Instagram integration
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.9+
+- PostgreSQL 13+
+- MongoDB 4.4+
+- Redis Server
+- Azure OpenAI API access
+
+### Installation
+
+1. Clone the repository:
+\`\`\`bash
+git clone https://github.com/yourusername/manipulator-ai.git
+cd manipulator-ai
+\`\`\`
+
+2. Set up a virtual environment:
+\`\`\`bash
+python -m venv venv
+source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+\`\`\`
+
+3. Install dependencies:
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+
+4. Configure environment variables:
+\`\`\`bash
+cp .env.example .env
+# Edit .env with your configuration
+\`\`\`
+
+5. Start the server:
+\`\`\`bash
+python src/main.py
+\`\`\`
+
+## Development
+
+### Project Structure
+
+\`\`\`
+manipulator-ai/
+├── src/
+│   ├── api/        # API endpoints
+│   ├── core/       # Core functionality
+│   ├── database/   # Database models and connections
+│   ├── models/     # Pydantic models
+│   ├── services/   # Business logic
+│   └── utils/      # Utility functions
+├── tests/          # Test cases
+├── config/         # Configuration files
+├── requirements.txt
+└── README.md
+\`\`\`
+
+### Running Tests
+
+\`\`\`bash
+pytest tests/
+\`\`\`
+
+## API Reference
+
+Detailed API documentation is available at `/docs` when running the server.
+
+  <p>
     <a href="#-features">Features</a> •
     <a href="#-architecture">Architecture</a> •
     <a href="#-quick-start">Quick Start</a> •
