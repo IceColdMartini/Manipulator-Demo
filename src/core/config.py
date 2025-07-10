@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str
     REDIS_PORT: int
     REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
 
     # Azure OpenAI Settings
     AZURE_OPENAI_API_KEY: str

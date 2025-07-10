@@ -13,7 +13,10 @@ redis_pool = ConnectionPool(
     port=settings.REDIS_PORT,
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD,
-    decode_responses=True
+    decode_responses=True,
+    retry_on_timeout=True,
+    socket_keepalive=True,
+    health_check_interval=30
 )
 
 async def get_redis_client() -> AsyncGenerator[Redis, None]:
