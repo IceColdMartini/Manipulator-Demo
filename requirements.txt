@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+redis
+asyncpg
+motor
+openai
+pydantic
+pydantic-settings
+python-dotenv
+sqlalchemy
+psycopg2-binary
+celery
+aioredis
+httpx
+greenlet
