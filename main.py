@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.core.database import db_manager
 from app.core.config import settings
+from app.api import webhooks, conversations, products
 import logging
 
 # Configure logging
@@ -40,12 +41,22 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Include API routers
+app.include_router(webhooks.router)
+app.include_router(conversations.router)
+app.include_router(products.router)
+
 @app.get("/")
 async def read_root():
     return {
         "message": "Welcome to ManipulatorAI",
         "version": "0.1.0",
-        "status": "running"
+        "status": "running",
+        "endpoints": {
+            "webhooks": "/webhook/facebook, /webhook/instagram",
+            "conversations": "/conversation/message, /conversation/{id}",
+            "products": "/products/, /products/{id}, /products/search"
+        }
     }
 
 @app.get("/health")
@@ -53,5 +64,10 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "timestamp": "2025-07-13T00:00:00Z"
+        "timestamp": "2025-07-13T00:00:00Z",
+        "databases": {
+            "postgresql": "connected",
+            "mongodb": "connected", 
+            "redis": "connected"
+        }
     }
