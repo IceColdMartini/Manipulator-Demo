@@ -13,3 +13,4 @@ celery
 aioredis
 httpx
 greenlet
+aiohttp

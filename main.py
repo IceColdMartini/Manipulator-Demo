@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.core.database import db_manager
 from app.core.config import settings
-from app.api import webhooks, conversations, products
+from app.api import webhooks, conversations, products, ai_testing
 import logging
 
 # Configure logging
@@ -45,6 +45,7 @@ app = FastAPI(
 app.include_router(webhooks.router)
 app.include_router(conversations.router)
 app.include_router(products.router)
+app.include_router(ai_testing.router)
 
 @app.get("/")
 async def read_root():
@@ -55,7 +56,8 @@ async def read_root():
         "endpoints": {
             "webhooks": "/webhook/facebook, /webhook/instagram",
             "conversations": "/conversation/message, /conversation/{id}",
-            "products": "/products/, /products/{id}, /products/search"
+            "products": "/products/, /products/{id}, /products/search",
+            "ai_testing": "/ai/extract-keywords, /ai/match-products, /ai/full-pipeline"
         }
     }
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from typing import List
+from typing import List, Optional
 from app.models.schemas import (
     CustomerMessage, ConversationResponse, Conversation,
     ConversationCreate, ConversationBranch, ConversationMessage,
@@ -8,6 +8,9 @@ from app.models.schemas import (
 from app.core.database import get_postgres_session, get_mongo_db, get_redis_client
 from app.services.product_service import ProductService
 from app.services.conversation_service import ConversationService
+from app.services.ai_service import AzureOpenAIService
+from app.services.enhanced_conversation_engine import EnhancedConversationEngine
+from app.services.task_manager import task_manager
 from sqlalchemy.ext.asyncio import AsyncSession
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
@@ -18,72 +21,100 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversation", tags=["conversations"])
 
+def get_conversation_engine(
+    postgres_session: AsyncSession = Depends(get_postgres_session),
+    mongo_db: AsyncIOMotorDatabase = Depends(get_mongo_db)
+) -> EnhancedConversationEngine:
+    """Dependency to get enhanced conversation engine with all services"""
+    ai_service = AzureOpenAIService()
+    product_service = ProductService(postgres_session)
+    conversation_service = ConversationService(mongo_db)
+    
+    return EnhancedConversationEngine(ai_service, product_service, conversation_service)
+
 @router.post("/message", response_model=ConversationResponse)
 async def process_customer_message(
     message: CustomerMessage,
     background_tasks: BackgroundTasks,
-    postgres_session: AsyncSession = Depends(get_postgres_session),
-    mongo_db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-    redis_client = Depends(get_redis_client)
+    conversation_engine: EnhancedConversationEngine = Depends(get_conversation_engine),
+    redis_client = Depends(get_redis_client),
+    async_processing: bool = False
 ):
     """
-    Process incoming customer message - This is the entry point for the Convincer branch
+    Process incoming customer message - Enhanced with async task processing
+    Set async_processing=True for background processing
     """
     try:
         logger.info(f"Processing message from customer {message.customer_id}: {message.message[:50]}...")
         
-        # Initialize services
-        product_service = ProductService(postgres_session)
-        conversation_service = ConversationService(mongo_db)
+        # If async processing is requested, queue the task
+        if async_processing:
+            task_id = task_manager.process_customer_message_async(
+                customer_id=message.customer_id,
+                business_id=message.business_id,
+                message=message.message,
+                message_metadata={
+                    "timestamp": message.timestamp.isoformat() if message.timestamp else datetime.utcnow().isoformat(),
+                    "channel": "api",
+                    "async_requested": True
+                }
+            )
+            
+            return ConversationResponse(
+                conversation_id="pending",
+                response=f"Your message is being processed. Task ID: {task_id}",
+                status="processing",
+                next_action="check_task_status",
+                task_id=task_id
+            )
         
+        # Otherwise, process synchronously (existing behavior)
         # Check for existing active conversation
-        existing_conversations = await conversation_service.get_active_conversations_for_customer(
+        existing_conversations = await conversation_engine.conversation_service.get_active_conversations_for_customer(
             message.customer_id
         )
         
         if existing_conversations:
-            # Continue existing conversation
+            # Continue existing conversation using enhanced engine
             conversation = existing_conversations[0]
             logger.info(f"Continuing existing conversation: {conversation.conversation_id}")
-        else:
-            # This is the Convincer branch - need to extract keywords and find products
-            # For now, we'll create a conversation with empty product context
-            # In Step 5, we'll implement the keyRetriever and tagMatcher logic
-            conversation_data = ConversationCreate(
-                customer_id=message.customer_id,
-                business_id=message.business_id,
-                product_context=[],  # Will be populated by keyRetriever + tagMatcher
-                conversation_branch=ConversationBranch.CONVINCER
+            
+            # Use enhanced conversation engine for continuation
+            result = await conversation_engine.continue_conversation(
+                conversation.conversation_id,
+                message.message,
+                {"timestamp": message.timestamp}
             )
             
-            conversation = await conversation_service.create_conversation(conversation_data)
-            logger.info(f"Created new conversation: {conversation.conversation_id}")
+            ai_response = result.get("ai_response", "I'm here to help you.")
+            status = result.get("conversation_status", "active")
+            
+        else:
+            # Start new Convincer conversation using enhanced engine
+            logger.info(f"Starting new Convincer conversation for customer {message.customer_id}")
+            
+            result = await conversation_engine.start_convincer_conversation(
+                customer_id=message.customer_id,
+                business_id=message.business_id,
+                initial_message=message.message,
+                customer_context={"timestamp": message.timestamp}
+            )
+            
+            if not result.get("success"):
+                raise HTTPException(status_code=500, detail=result.get("error", "Failed to start conversation"))
+            
+            conversation_id = result.get("conversation_id")
+            ai_response = result.get("ai_response", "Hello! How can I help you today?")
+            status = result.get("conversation_status", "active")
+            
+            # Get conversation object for response
+            conversation = await conversation_engine.conversation_service.get_conversation(conversation_id)
         
-        # Add customer message to conversation
-        customer_msg = ConversationMessage(
-            timestamp=message.timestamp or datetime.now(),
-            sender=MessageSender.CUSTOMER,
-            content=message.message,
-            intent="inquiry"
-        )
-        
-        await conversation_service.add_message(conversation.conversation_id, customer_msg)
-        
-        # Queue message for AI processing
-        await redis_client.lpush("ai_processing_queue", json.dumps({
-            "conversation_id": conversation.conversation_id,
-            "customer_message": message.message,
-            "timestamp": datetime.now().isoformat(),
-            "branch": "convincer"
-        }))
-        
-        # For now, return a placeholder response
-        # In Step 6, this will be replaced with actual AI-generated responses
         return ConversationResponse(
-            conversation_id=conversation.conversation_id,
-            response="Thank you for your message! Our AI agent is processing your request and will respond shortly.",
-            status=conversation.status,
-            next_action="ai_processing"
+            conversation_id=conversation_id if 'conversation_id' in locals() else conversation.conversation_id,
+            response=ai_response,
+            status=status if 'status' in locals() else conversation.status,
+            next_action="conversation_active"
         )
         
     except Exception as e:
@@ -127,16 +158,54 @@ async def get_conversation_history(
         logger.error(f"Error retrieving conversation history {conversation_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve conversation history")
 
+@router.post("/{conversation_id}/continue", response_model=ConversationResponse)
+async def continue_conversation(
+    conversation_id: str,
+    message_data: dict,
+    conversation_engine: EnhancedConversationEngine = Depends(get_conversation_engine)
+):
+    """
+    Continue an existing conversation with a new customer message
+    """
+    try:
+        customer_message = message_data.get("message", "")
+        if not customer_message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        # Use enhanced conversation engine for continuation
+        result = await conversation_engine.continue_conversation(
+            conversation_id,
+            customer_message,
+            {"timestamp": datetime.now()}
+        )
+        
+        ai_response = result.get("ai_response", "I'm here to help you.")
+        status = result.get("conversation_status", "active")
+        
+        return ConversationResponse(
+            conversation_id=conversation_id,
+            response=ai_response,
+            status=status,
+            next_action="conversation_active"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error continuing conversation {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to continue conversation")
+
 @router.post("/webhook-interaction")
 async def process_webhook_interaction(
     interaction_data: dict,
     background_tasks: BackgroundTasks,
-    postgres_session: AsyncSession = Depends(get_postgres_session),
-    mongo_db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-    redis_client = Depends(get_redis_client)
+    conversation_engine: EnhancedConversationEngine = Depends(get_conversation_engine),
+    redis_client = Depends(get_redis_client),
+    async_processing: bool = True  # Default to async for webhooks
 ):
     """
-    Process webhook interaction data - This is the entry point for the Manipulator branch
+    Process webhook interaction data - Enhanced with async task processing
+    Webhooks default to async processing to ensure fast response times
     """
     try:
         logger.info(f"Processing webhook interaction: {interaction_data}")
@@ -146,44 +215,56 @@ async def process_webhook_interaction(
         business_id = interaction_data.get("business_id", "unknown_business")
         product_id = interaction_data.get("product_id")
         interaction_type = interaction_data.get("interaction_type", "unknown")
+        platform = interaction_data.get("platform", "unknown")
         
+        # For async processing, queue the task immediately
+        if async_processing:
+            task_id = task_manager.process_webhook_async(
+                webhook_data=interaction_data,
+                platform=platform,
+                priority="high"  # Webhooks get high priority
+            )
+            
+            return ConversationResponse(
+                conversation_id="pending",
+                response="Webhook received and being processed",
+                status="processing",
+                next_action="webhook_processed",
+                task_id=task_id
+            )
+        
+        # Synchronous processing (fallback)
         if not product_id:
             raise HTTPException(status_code=400, detail="Product ID is required for webhook interactions")
         
-        # Initialize services
-        product_service = ProductService(postgres_session)
-        conversation_service = ConversationService(mongo_db)
-        
         # Verify product exists
-        product = await product_service.get_product_by_id(product_id)
+        product = await conversation_engine.product_service.get_product_by_id(product_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
-        # Create conversation for Manipulator branch
-        conversation_data = ConversationCreate(
+        # Start Manipulator conversation using enhanced engine
+        result = await conversation_engine.start_manipulator_conversation(
             customer_id=customer_id,
             business_id=business_id,
-            product_context=[product_id],  # Direct product context from interaction
-            conversation_branch=ConversationBranch.MANIPULATOR
+            interaction_data={
+                "product_id": product_id,
+                "type": interaction_type,
+                "platform": platform
+            }
         )
         
-        conversation = await conversation_service.create_conversation(conversation_data)
-        logger.info(f"Created manipulator conversation: {conversation.conversation_id}")
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to start conversation"))
         
-        # Queue for AI processing
-        await redis_client.lpush("ai_processing_queue", json.dumps({
-            "conversation_id": conversation.conversation_id,
-            "product_id": product_id,
-            "interaction_type": interaction_type,
-            "timestamp": datetime.now().isoformat(),
-            "branch": "manipulator"
-        }))
+        conversation_id = result.get("conversation_id")
+        ai_response = result.get("ai_response", "Welcome! I'd love to help you with this product.")
+        status = "active"
         
         return ConversationResponse(
-            conversation_id=conversation.conversation_id,
-            response="Hello! I noticed you showed interest in our product. Let me help you learn more about it!",
-            status=conversation.status,
-            next_action="ai_processing"
+            conversation_id=conversation_id,
+            response=ai_response,
+            status=status,
+            next_action="conversation_active"
         )
         
     except HTTPException:
@@ -191,3 +272,93 @@ async def process_webhook_interaction(
     except Exception as e:
         logger.error(f"Error processing webhook interaction: {e}")
         raise HTTPException(status_code=500, detail="Failed to process interaction")
+
+
+# Task Status Monitoring Endpoints
+@router.get("/tasks/{task_id}/status")
+async def get_task_status(task_id: str):
+    """
+    Get the status of an async task
+    """
+    try:
+        status_info = task_manager.get_task_status(task_id)
+        
+        if not status_info:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return {
+            "task_id": task_id,
+            "status": status_info.get("status"),
+            "progress": status_info.get("progress"),
+            "result": status_info.get("result"),
+            "error": status_info.get("error"),
+            "created_at": status_info.get("created_at"),
+            "updated_at": status_info.get("updated_at")
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task status: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/tasks/queues/status")
+async def get_queue_status():
+    """
+    Get the status of all task queues
+    """
+    try:
+        queue_stats = task_manager.get_queue_statistics()
+        
+        return {
+            "queues": queue_stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting queue status: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/tasks/active")
+async def get_active_tasks():
+    """
+    Get list of currently active tasks
+    """
+    try:
+        active_tasks = task_manager.get_active_tasks()
+        
+        return {
+            "active_tasks": active_tasks,
+            "count": len(active_tasks),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting active tasks: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """
+    Cancel a running task
+    """
+    try:
+        success = task_manager.cancel_task(task_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Task not found or cannot be cancelled")
+        
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "Task cancelled successfully"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling task: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
