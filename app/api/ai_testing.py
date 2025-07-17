@@ -155,7 +155,9 @@ async def test_full_ai_pipeline(
         }
         
         ai_response = await ai_service.generate_conversation_response(
-            context, customer_message, is_welcome=True
+            conversation_context=context,
+            customer_message=customer_message,
+            is_welcome=True
         )
         
         return {

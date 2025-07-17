@@ -187,11 +187,24 @@ AVAILABLE PRODUCTS:
             price = attributes.get('price', f'${product.price}' if product.price else 'Contact for pricing')
             brand = attributes.get('brand', 'Quality Brand')
             
-            # Use description, not product_description
+            # Use description field from Product model
             description = product.description if product.description else product.name
             formatted.append(f"{i}. {description[:100]}{'...' if len(description) > 100 else ''}")
             formatted.append(f"   Brand: {brand} | Price: {price}")
-            formatted.append(f"   Key Features: {', '.join(product.product_tag[:5])}")
+            
+            # Use category or metadata tags for features instead of product_tag
+            features = []
+            if product.category:
+                features.append(product.category)
+            if hasattr(product, 'metadata') and product.metadata:
+                tags = product.metadata.get('tags', [])
+                if isinstance(tags, list):
+                    features.extend(tags[:3])  # Add up to 3 tags
+            
+            if features:
+                formatted.append(f"   Key Features: {', '.join(features)}")
+            else:
+                formatted.append(f"   Category: {product.category if product.category else 'General'}")
         
         return "\n".join(formatted)
     
