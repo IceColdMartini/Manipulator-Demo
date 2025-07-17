@@ -2,6 +2,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import redis.asyncio as aioredis
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.models.database import Base
 import logging
@@ -92,6 +93,22 @@ class DatabaseManager:
             logger.error(f"Failed to create tables: {e}")
             raise
     
+    @asynccontextmanager
+    async def get_postgres_session(self):
+        """Provide a transactional scope around a series of operations."""
+        if not self.postgres_session:
+            raise Exception("PostgreSQL session not initialized. Call connect_postgresql first.")
+        
+        session = self.postgres_session()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
     async def close_connections(self):
         """Close all database connections"""
         if self.postgres_engine:
@@ -104,6 +121,18 @@ class DatabaseManager:
             await self.redis_client.close()
         
         logger.info("All database connections closed")
+    
+    def get_mongo_db(self):
+        """Get the MongoDB database instance"""
+        if self.mongo_db is None:
+            raise Exception("MongoDB not initialized. Call connect_mongodb first.")
+        return self.mongo_db
+
+    def get_redis_client(self):
+        """Get the Redis client instance"""
+        if not self.redis_client:
+            raise Exception("Redis not initialized. Call connect_redis first.")
+        return self.redis_client
 
 # Global database manager instance
 db_manager = DatabaseManager()

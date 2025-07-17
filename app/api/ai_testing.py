@@ -55,20 +55,37 @@ async def test_product_matching(
             raise HTTPException(status_code=400, detail="Keywords are required")
         
         product_service = ProductService(postgres_session)
-        matches = await product_service.search_products_by_tags(keywords, threshold)
+        matches = await product_service.search_products_by_keywords(keywords)
+        
+        # Convert to the expected format with scores
+        formatted_matches = []
+        for product in matches:
+            # Calculate a simple score based on keyword matches
+            score = 0.5  # Default score
+            for keyword in keywords:
+                if keyword.lower() in product.description.lower():
+                    score += 0.2
+                if keyword.lower() in product.name.lower():
+                    score += 0.3
+            
+            formatted_matches.append({
+                "product_id": str(product.id),
+                "score": min(score, 1.0),
+                "product": product
+            })
         
         return {
             "keywords": keywords,
             "threshold": threshold,
-            "matches_found": len(matches),
+            "matches_found": len(formatted_matches),
             "matches": [
                 {
                     "product_id": match["product_id"],
                     "score": match["score"],
-                    "product_name": match["product"].product_description[:50] + "...",
-                    "product_tags": match["product"].product_tag
+                    "product_name": match["product"].description[:50] + "...",
+                    "product_tags": [match["product"].category] if match["product"].category else []
                 }
-                for match in matches
+                for match in formatted_matches
             ],
             "subsystem": "tagMatcher"
         }
@@ -103,13 +120,36 @@ async def test_full_ai_pipeline(
         
         # Step 2: tagMatcher
         logger.info("Step 2: Running tagMatcher...")
-        matches = await product_service.search_products_by_tags(keywords, threshold=0.3)
+        products = await product_service.search_products_by_keywords(keywords)
+        
+        # Format products with scores for compatibility
+        matches = []
+        for product in products:
+            # Calculate simple score based on keyword matches
+            score = 0.5
+            for keyword in keywords:
+                if keyword.lower() in product.description.lower():
+                    score += 0.2
+                if keyword.lower() in product.name.lower():
+                    score += 0.3
+            
+            matches.append({
+                "product": product,
+                "score": min(score, 1.0)
+            })
         
         # Step 3: AI Response Generation
         logger.info("Step 3: Generating AI response...")
         context = {
             "branch": "convincer",
-            "products": [match["product"].dict() for match in matches[:3]],
+            "products": [
+                {
+                    "product_description": match["product"].description,
+                    "product_tag": [match["product"].category] if match["product"].category else [],
+                    "product_attributes": {"price": f"${match['product'].price}"}
+                }
+                for match in matches[:3]
+            ],
             "keywords": keywords,
             "conversation_history": []
         }
@@ -125,7 +165,7 @@ async def test_full_ai_pipeline(
             "step_2_products": [
                 {
                     "score": match["score"],
-                    "product_name": match["product"].product_description[:40] + "..."
+                    "product_name": match["product"].description[:40] + "..." if match["product"].description else match["product"].name[:40] + "..."
                 }
                 for match in matches[:3]
             ],

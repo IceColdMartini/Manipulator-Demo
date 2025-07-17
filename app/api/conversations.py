@@ -45,7 +45,9 @@ async def process_customer_message(
     Set async_processing=True for background processing
     """
     try:
+        print(f"🔍 DEBUG: Conversation endpoint hit with customer_id={message.customer_id}")
         logger.info(f"Processing message from customer {message.customer_id}: {message.message[:50]}...")
+        logger.info(f"Message details: customer_id={message.customer_id}, business_id={message.business_id}, platform={message.platform}")
         
         # If async processing is requested, queue the task
         if async_processing:
@@ -119,6 +121,9 @@ async def process_customer_message(
         
     except Exception as e:
         logger.error(f"Error processing customer message: {e}")
+        logger.error(f"Error type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to process message")
 
 @router.get("/{conversation_id}", response_model=Conversation)

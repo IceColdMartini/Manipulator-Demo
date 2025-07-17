@@ -54,10 +54,10 @@ class ConversationService:
             logger.error(f"Failed to create conversation: {e}")
             raise
     
-    async def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+    async def get_conversation_by_id(self, conversation_id: str) -> Optional[Conversation]:
         """Get a conversation by ID"""
         try:
-            doc = await self.collection.find_one({"_id": conversation_id})
+            doc = await self.collection.find_one({"conversation_id": conversation_id})
             if doc:
                 return self._doc_to_pydantic(doc)
             return None

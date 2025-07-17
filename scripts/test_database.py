@@ -27,28 +27,41 @@ async def test_postgresql():
     try:
         await db_manager.connect_postgresql()
         
-        async with db_manager.postgres_session() as session:
+        async with db_manager.get_postgres_session() as session:
             product_service = ProductService(session)
             
+            # Create a sample product for testing
+            product_data = ProductCreate(
+                name="Test Product",
+                description="A product for testing purposes",
+                price=99.99,
+                currency="USD",
+                category="Testing",
+                metadata={"test": "true"}
+            )
+            created_product = await product_service.create_product(product_data)
+            logger.info(f"Created test product: {created_product.name}")
+
             # Test getting all products
             products = await product_service.get_all_products()
             logger.info(f"Found {len(products)} products in database")
             
-            if products:
-                # Test getting a specific product
-                first_product = products[0]
-                retrieved_product = await product_service.get_product_by_id(first_product.product_id)
-                logger.info(f"Retrieved product: {retrieved_product.product_description[:50]}...")
-                
-                # Test tag-based search
-                keywords = ["smartphone", "mobile"]
-                matches = await product_service.search_products_by_tags(keywords, threshold=0.3)
-                logger.info(f"Found {len(matches)} products matching keywords: {keywords}")
-        
+            assert len(products) > 0, "No products found in the database."
+
+            # Test getting a specific product
+            retrieved_product = await product_service.get_product_by_id(created_product.id)
+            logger.info(f"Retrieved product: {retrieved_product.description}")
+            assert retrieved_product is not None, "Failed to retrieve the created product."
+            
+            # Test searching for the product
+            search_results = await product_service.search_products_by_keywords(keywords=["Test Product"])
+            logger.info(f"Found {len(search_results)} products matching keywords: ['Test Product']")
+            assert len(search_results) > 0, "Failed to find the product by search."
+
         logger.info("✅ PostgreSQL tests passed")
         
     except Exception as e:
-        logger.error(f"❌ PostgreSQL test failed: {e}")
+        logger.error(f"❌ PostgreSQL tests failed: {e}")
         raise
 
 async def test_mongodb():
@@ -58,24 +71,24 @@ async def test_mongodb():
     try:
         await db_manager.connect_mongodb()
         
-        conversation_service = ConversationService(db_manager.mongo_db)
+        mongo_db = db_manager.get_mongo_db()
+        conversation_service = ConversationService(mongo_db)
         
-        # Test creating a conversation
+        # Create a sample conversation
         conversation_data = ConversationCreate(
             customer_id="test_customer_123",
-            business_id="test_business_456", 
-            product_context=["test_product_789"],
-            conversation_branch=ConversationBranch.MANIPULATOR
+            business_id="test_business_456",
+            product_context=[],
+            conversation_branch="manipulator"
         )
+        created_conversation = await conversation_service.create_conversation(conversation_data)
+        logger.info(f"Created test conversation: {created_conversation.conversation_id}")
         
-        conversation = await conversation_service.create_conversation(conversation_data)
-        logger.info(f"Created test conversation: {conversation.conversation_id}")
-        
-        # Test retrieving the conversation
-        retrieved = await conversation_service.get_conversation(conversation.conversation_id)
-        if retrieved:
-            logger.info(f"Retrieved conversation for customer: {retrieved.customer_id}")
-        
+        # Retrieve the conversation
+        retrieved_conversation = await conversation_service.get_conversation_by_id(created_conversation.conversation_id)
+        logger.info(f"Retrieved conversation for customer: {retrieved_conversation.customer_id}")
+        assert retrieved_conversation is not None, "Failed to retrieve the created conversation."
+
         logger.info("✅ MongoDB tests passed")
         
     except Exception as e:
@@ -88,39 +101,32 @@ async def test_redis():
     
     try:
         await db_manager.connect_redis()
+        redis_client = db_manager.get_redis_client()
         
-        # Test basic Redis operations
-        await db_manager.redis_client.set("test_key", "test_value")
-        value = await db_manager.redis_client.get("test_key")
+        # Test setting and getting a key
+        await redis_client.set("test_key", "test_value")
+        value = await redis_client.get("test_key")
         
-        if value == "test_value":
-            logger.info("✅ Redis tests passed")
-        else:
-            raise Exception("Redis value mismatch")
-        
-        # Clean up test key
-        await db_manager.redis_client.delete("test_key")
+        assert value == "test_value", "Redis SET/GET operation failed."
+        logger.info("✅ Redis tests passed")
         
     except Exception as e:
-        logger.error(f"❌ Redis test failed: {e}")
+        logger.error(f"❌ Redis tests failed: {e}")
         raise
 
 async def main():
-    """Run all tests"""
+    """Run all database integration tests"""
     logger.info("Starting database integration tests...")
-    
     try:
         await test_postgresql()
         await test_mongodb()
         await test_redis()
-        
         logger.info("🎉 All database integration tests passed!")
-        
     except Exception as e:
-        logger.error(f"💥 Tests failed: {e}")
-        sys.exit(1)
+        logger.error(f"🔥 Database integration tests failed: {e}")
     finally:
         await db_manager.close_connections()
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())

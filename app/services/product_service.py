@@ -18,9 +18,12 @@ class ProductService:
         """Create a new product"""
         try:
             db_product = ProductModel(
-                product_attributes=product_data.product_attributes.dict(),
-                product_tag=product_data.product_tag,
-                product_description=product_data.product_description
+                name=product_data.name,
+                description=product_data.description,
+                price=product_data.price,
+                currency=product_data.currency,
+                category=product_data.category,
+                product_metadata=product_data.metadata
             )
             
             self.session.add(db_product)
@@ -37,7 +40,7 @@ class ProductService:
     async def get_product_by_id(self, product_id: str) -> Optional[Product]:
         """Get a product by its ID"""
         try:
-            query = select(ProductModel).where(ProductModel.product_id == uuid.UUID(product_id))
+            query = select(ProductModel).where(ProductModel.id == uuid.UUID(product_id))
             result = await self.session.execute(query)
             db_product = result.scalar_one_or_none()
             
@@ -53,7 +56,7 @@ class ProductService:
         """Get multiple products by their IDs"""
         try:
             uuid_ids = [uuid.UUID(pid) for pid in product_ids]
-            query = select(ProductModel).where(ProductModel.product_id.in_(uuid_ids))
+            query = select(ProductModel).where(ProductModel.id.in_(uuid_ids))
             result = await self.session.execute(query)
             db_products = result.scalars().all()
             
@@ -63,34 +66,22 @@ class ProductService:
             logger.error(f"Failed to get products {product_ids}: {e}")
             raise
     
-    async def search_products_by_tags(self, keywords: List[str], threshold: float = 0.8) -> List[Dict[str, Any]]:
-        """
-        Search products by tags with similarity scoring
-        Returns list of dictionaries with product_id and score
-        """
+    async def search_products_by_keywords(self, keywords: List[str]) -> List[Product]:
+        """Search products by keywords in name and description."""
         try:
-            # Get all products
-            query = select(ProductModel)
+            clauses = []
+            for keyword in keywords:
+                clauses.append(ProductModel.name.ilike(f"%{keyword}%"))
+                clauses.append(ProductModel.description.ilike(f"%{keyword}%"))
+            
+            query = select(ProductModel).where(or_(*clauses))
             result = await self.session.execute(query)
-            all_products = result.scalars().all()
+            db_products = result.scalars().all()
             
-            matches = []
-            for product in all_products:
-                # Calculate similarity score
-                score = self._calculate_tag_similarity(keywords, product.product_tag)
-                if score >= threshold:
-                    matches.append({
-                        'product_id': str(product.product_id),
-                        'score': score,
-                        'product': self._to_pydantic(product)
-                    })
-            
-            # Sort by score descending
-            matches.sort(key=lambda x: x['score'], reverse=True)
-            return matches
+            return [self._to_pydantic(product) for product in db_products]
             
         except Exception as e:
-            logger.error(f"Failed to search products by tags: {e}")
+            logger.error(f"Failed to search products by keywords: {e}")
             raise
     
     async def get_all_products(self) -> List[Product]:
@@ -105,7 +96,7 @@ class ProductService:
         except Exception as e:
             logger.error(f"Failed to get all products: {e}")
             raise
-    
+            
     def _calculate_tag_similarity(self, keywords: List[str], product_tags: List[str]) -> float:
         """
         Calculate similarity score between keywords and product tags
@@ -130,10 +121,11 @@ class ProductService:
     def _to_pydantic(self, db_product: ProductModel) -> Product:
         """Convert SQLAlchemy model to Pydantic model"""
         return Product(
-            product_id=str(db_product.product_id),
-            product_attributes=ProductAttributes(**db_product.product_attributes),
-            product_tag=db_product.product_tag,
-            product_description=db_product.product_description,
-            created_at=db_product.created_at,
-            updated_at=db_product.updated_at
+            id=str(db_product.id),
+            name=db_product.name,
+            description=db_product.description,
+            price=db_product.price,
+            currency=db_product.currency,
+            category=db_product.category,
+            metadata=db_product.product_metadata
         )

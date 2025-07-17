@@ -154,8 +154,13 @@ Generate a natural, helpful response that smoothly introduces the alternative pr
         
         categories = set()
         for product in products:
-            if hasattr(product, 'product_attributes') and 'category' in product.product_attributes:
-                categories.add(product.product_attributes['category'])
+            # Check for category in metadata first, then product category field
+            if hasattr(product, 'metadata') and product.metadata and 'category' in product.metadata:
+                categories.add(product.metadata['category'])
+            elif hasattr(product, 'product_metadata') and product.product_metadata and 'category' in product.product_metadata:
+                categories.add(product.product_metadata['category'])
+            elif hasattr(product, 'category') and product.category:
+                categories.add(product.category)
         
         category_text = ", ".join(categories) if categories else "various categories"
         
@@ -172,11 +177,19 @@ AVAILABLE PRODUCTS:
         
         formatted = []
         for i, product in enumerate(products[:3], 1):  # Limit to top 3 products
-            attributes = getattr(product, 'product_attributes', {})
-            price = attributes.get('price', 'Contact for pricing')
+            # Use metadata or product_metadata to get attributes
+            attributes = {}
+            if hasattr(product, 'metadata') and product.metadata:
+                attributes = product.metadata
+            elif hasattr(product, 'product_metadata') and product.product_metadata:
+                attributes = product.product_metadata
+            
+            price = attributes.get('price', f'${product.price}' if product.price else 'Contact for pricing')
             brand = attributes.get('brand', 'Quality Brand')
             
-            formatted.append(f"{i}. {product.product_description[:100]}{'...' if len(product.product_description) > 100 else ''}")
+            # Use description, not product_description
+            description = product.description if product.description else product.name
+            formatted.append(f"{i}. {description[:100]}{'...' if len(description) > 100 else ''}")
             formatted.append(f"   Brand: {brand} | Price: {price}")
             formatted.append(f"   Key Features: {', '.join(product.product_tag[:5])}")
         

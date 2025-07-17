@@ -55,7 +55,7 @@ class ConversationResponse(BaseModel):
 
 # Product Models
 class ProductAttributes(BaseModel):
-    price: Optional[str] = None
+    price: Optional[float] = None
     color: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
@@ -65,17 +65,24 @@ class ProductAttributes(BaseModel):
         extra = "allow"
 
 class Product(BaseModel):
-    product_id: str
-    product_attributes: ProductAttributes
-    product_tag: List[str]
-    product_description: str
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    id: str
+    name: str
+    description: Optional[str] = None
+    price: float
+    currency: str
+    category: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        orm_mode = True
 
 class ProductCreate(BaseModel):
-    product_attributes: ProductAttributes
-    product_tag: List[str]
-    product_description: str
+    name: str
+    description: Optional[str] = None
+    price: float
+    currency: str = "USD"
+    category: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 # Conversation Models
 class Conversation(BaseModel):

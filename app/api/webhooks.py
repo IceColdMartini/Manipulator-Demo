@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from typing import Dict, Any
-from app.models.schemas import FacebookWebhookPayload, InstagramWebhookPayload
 from app.core.config import settings
-from app.core.database import get_redis_client
 import logging
 import hashlib
 import hmac
+from app.tasks.webhook_tasks import (
+    process_facebook_webhook_task,
+    process_instagram_webhook_task
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +76,7 @@ async def facebook_webhook_verification(request: Request):
 
 @router.post("/facebook")
 async def facebook_webhook_handler(
-    request: Request,
-    redis_client = Depends(get_redis_client)
+    request: Request
 ):
     """Handle Facebook webhook events"""
     try:
@@ -83,7 +84,7 @@ async def facebook_webhook_handler(
         body = await request.body()
         signature = request.headers.get("X-Hub-Signature-256", "")
         
-        # Verify signature (in production, uncomment this)
+        # In a production environment, you should uncomment this verification
         # if not verify_facebook_signature(body, signature):
         #     logger.warning("Facebook webhook signature verification failed")
         #     raise HTTPException(status_code=403, detail="Invalid signature")
@@ -94,16 +95,11 @@ async def facebook_webhook_handler(
         
         logger.info(f"Received Facebook webhook: {payload_data}")
         
-        # Queue the webhook for processing
-        queue_key = "facebook_webhook_queue"
-        await redis_client.lpush(queue_key, json.dumps({
-            "source": "facebook",
-            "timestamp": "2025-07-13T16:30:00Z",
-            "payload": payload_data
-        }))
+        # Asynchronously process the webhook
+        process_facebook_webhook_task.delay(payload_data)
         
-        logger.info("Facebook webhook queued for processing")
-        return {"status": "success", "message": "Webhook received and queued"}
+        logger.info("Facebook webhook task queued for processing")
+        return {"status": "success", "message": "Webhook received and queued for processing"}
         
     except json.JSONDecodeError as e:
         logger.error(f"Facebook webhook JSON parsing error: {e}")
@@ -135,15 +131,14 @@ async def instagram_webhook_verification(request: Request):
 
 @router.post("/instagram")
 async def instagram_webhook_handler(
-    request: Request,
-    redis_client = Depends(get_redis_client)
+    request: Request
 ):
     """Handle Instagram webhook events"""
     try:
         body = await request.body()
         signature = request.headers.get("X-Hub-Signature-256", "")
         
-        # Verify signature (in production, uncomment this)
+        # In a production environment, you should uncomment this verification
         # if not verify_instagram_signature(body, signature):
         #     logger.warning("Instagram webhook signature verification failed")
         #     raise HTTPException(status_code=403, detail="Invalid signature")
@@ -153,16 +148,11 @@ async def instagram_webhook_handler(
         
         logger.info(f"Received Instagram webhook: {payload_data}")
         
-        # Queue the webhook for processing
-        queue_key = "instagram_webhook_queue"
-        await redis_client.lpush(queue_key, json.dumps({
-            "source": "instagram",
-            "timestamp": "2025-07-13T16:30:00Z",
-            "payload": payload_data
-        }))
+        # Asynchronously process the webhook
+        process_instagram_webhook_task.delay(payload_data)
         
-        logger.info("Instagram webhook queued for processing")
-        return {"status": "success", "message": "Webhook received and queued"}
+        logger.info("Instagram webhook task queued for processing")
+        return {"status": "success", "message": "Webhook received and queued for processing"}
         
     except json.JSONDecodeError as e:
         logger.error(f"Instagram webhook JSON parsing error: {e}")

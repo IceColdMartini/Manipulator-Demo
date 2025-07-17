@@ -19,8 +19,8 @@ def create_celery_app() -> Celery:
     # Initialize Celery with Redis as broker and backend
     celery_app = Celery(
         "manipulator_ai",
-        broker=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0",
-        backend=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0",
+        broker=f"redis://{settings.redis_host}:{settings.redis_port}/0",
+        backend=f"redis://{settings.redis_host}:{settings.redis_port}/0",
         include=[
             "app.tasks.conversation_tasks",
             "app.tasks.webhook_tasks", 

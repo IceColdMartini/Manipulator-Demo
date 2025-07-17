@@ -39,8 +39,7 @@ from app.core.error_handling import (
 )
 
 # Database connections
-from app.core.database import get_mongo_db, get_postgres_db
-from app.core.redis_client import get_redis_client
+from app.core.database import get_mongo_db, get_postgres_session, get_redis_client
 
 # API routers
 from app.api import conversations
@@ -165,7 +164,7 @@ app = FastAPI(
 # Add middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -173,7 +172,7 @@ app.add_middleware(
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=settings.ALLOWED_HOSTS
+    allowed_hosts=settings.allowed_hosts
 )
 
 

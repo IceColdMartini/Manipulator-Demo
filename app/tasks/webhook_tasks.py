@@ -117,6 +117,85 @@ def process_facebook_webhook_task(self, webhook_data: Dict[str, Any]):
         )
         raise
 
+@celery_app.task(bind=True, name="process_instagram_webhook")
+def process_instagram_webhook_task(self, webhook_data: Dict[str, Any]):
+    """
+    Asynchronously process Instagram webhook events
+    """
+    try:
+        task_id = self.request.id
+        logger.info(f"Processing Instagram webhook task {task_id}")
+        
+        self.update_state(
+            state="PROCESSING",
+            meta={
+                "webhook_type": "instagram",
+                "started_at": datetime.utcnow().isoformat(),
+                "progress": 0
+            }
+        )
+        
+        entries = webhook_data.get("entry", [])
+        processed_interactions = []
+        
+        for i, entry in enumerate(entries):
+            try:
+                progress = int((i / len(entries)) * 90)
+                self.update_state(
+                    state="PROCESSING",
+                    meta={
+                        "webhook_type": "instagram",
+                        "progress": progress,
+                        "status": f"Processing entry {i + 1}/{len(entries)}"
+                    }
+                )
+                
+                if "messaging" in entry:
+                    for message_event in entry["messaging"]:
+                        interaction = process_instagram_message_event(message_event)
+                        if interaction:
+                            # Trigger manipulator conversation asynchronously
+                            process_manipulator_interaction_task.delay(
+                                customer_id=interaction["customer_id"],
+                                business_id=interaction["business_id"],
+                                interaction_data=interaction["interaction_data"]
+                            )
+                            processed_interactions.append(interaction)
+                            
+            except Exception as e:
+                logger.error(f"Error processing Instagram entry {i}: {e}")
+                continue
+        
+        self.update_state(
+            state="SUCCESS",
+            meta={
+                "webhook_type": "instagram",
+                "progress": 100,
+                "status": "Completed successfully",
+                "completed_at": datetime.utcnow().isoformat(),
+                "processed_interactions": len(processed_interactions),
+                "interactions": processed_interactions
+            }
+        )
+        
+        logger.info(f"Successfully processed Instagram webhook task {task_id}")
+        return {
+            "processed_interactions": len(processed_interactions),
+            "interactions": processed_interactions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in Instagram webhook task: {e}")
+        self.update_state(
+            state="FAILURE",
+            meta={
+                "webhook_type": "instagram",
+                "error": str(e),
+                "failed_at": datetime.utcnow().isoformat()
+            }
+        )
+        raise
+
 @celery_app.task(bind=True, name="process_google_webhook")
 def process_google_webhook_task(self, webhook_data: Dict[str, Any]):
     """
@@ -375,6 +454,31 @@ def process_facebook_message_event(message_data: Dict[str, Any]) -> Optional[Dic
         
     except Exception as e:
         logger.error(f"Error processing Facebook message event: {e}")
+        return None
+
+def process_instagram_message_event(message_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Process Instagram direct message events"""
+    try:
+        sender = message_data.get("sender", {})
+        recipient = message_data.get("recipient", {})
+        message = message_data.get("message", {})
+        
+        if sender.get("id") and message.get("text"):
+            return {
+                "customer_id": f"ig_{sender['id']}",
+                "business_id": f"ig_page_{recipient.get('id', 'unknown')}",
+                "interaction_data": {
+                    "type": "message",
+                    "platform": "instagram",
+                    "message": message["text"],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            }
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error processing Instagram message event: {e}")
         return None
 
 def process_google_click_event(webhook_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:

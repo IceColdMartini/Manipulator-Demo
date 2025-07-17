@@ -66,12 +66,32 @@ class ConversationManager:
             products = await self._get_relevant_products(initial_context, branch)
             
             # Create conversation record
-            conversation_id = await self.conversation_service.create_conversation(
+            from app.models.schemas import ConversationCreate
+            
+            # Convert initial_context dict to product_context list of strings
+            product_context_list = []
+            if initial_context:
+                # Extract meaningful strings from the context
+                if 'initial_message' in initial_context:
+                    product_context_list.append(f"message: {initial_context['initial_message']}")
+                if 'product_id' in initial_context:
+                    product_context_list.append(f"product_id: {initial_context['product_id']}")
+                if 'source' in initial_context:
+                    product_context_list.append(f"source: {initial_context['source']}")
+                # Add any keywords if present
+                if 'keywords' in initial_context:
+                    keywords = initial_context['keywords']
+                    if isinstance(keywords, list):
+                        product_context_list.extend([f"keyword: {kw}" for kw in keywords])
+            
+            conversation_data = ConversationCreate(
                 customer_id=customer_id,
                 business_id=business_id,
-                branch=branch,
-                initial_context=initial_context
+                conversation_branch=branch,
+                product_context=product_context_list
             )
+            conversation = await self.conversation_service.create_conversation(conversation_data)
+            conversation_id = conversation.conversation_id
             
             # Generate welcome prompt
             welcome_prompt = self.prompt_engine.generate_welcome_prompt(
@@ -83,15 +103,14 @@ class ConversationManager:
             
             # Generate AI welcome response
             welcome_message = await self.ai_service.generate_conversation_response(
-                context={
+                conversation_context={
                     "branch": branch.value,
                     "products": [p.dict() for p in products],
                     "customer_context": initial_context,
                     "conversation_history": []
                 },
                 customer_message="",
-                is_welcome=True,
-                custom_prompt=welcome_prompt
+                is_welcome=True
             )
             
             # Store welcome message
@@ -230,11 +249,11 @@ class ConversationManager:
             # For convincer branch or when no specific product, get products based on keywords
             keywords = context.get("keywords", [])
             if keywords:
-                matches = await self.product_service.search_products_by_tags(keywords, threshold=0.3)
+                matches = await self.product_service.search_products_by_keywords(keywords, threshold=0.3)
                 return [match["product"] for match in matches[:limit]]
             
             # Fallback: get recent products
-            return await self.product_service.get_recent_products(limit=limit)
+            return await self.product_service.get_all_products()
             
         except Exception as e:
             logger.error(f"Error getting relevant products: {e}")
@@ -353,7 +372,7 @@ Provide analysis in JSON format:
             )
             
             if keywords:
-                matches = await self.product_service.search_products_by_tags(keywords, threshold=0.3)
+                matches = await self.product_service.search_products_by_keywords(keywords, threshold=0.3)
                 if matches:
                     return [match["product"] for match in matches[:3]]
             
@@ -390,15 +409,14 @@ Provide analysis in JSON format:
             
             # Generate AI response
             response = await self.ai_service.generate_conversation_response(
-                context={
+                conversation_context={
                     "branch": branch.value,
                     "products": [p.dict() for p in products],
                     "conversation_history": [msg.dict() for msg in history[-5:]],
                     "customer_context": customer_context or {}
                 },
                 customer_message=customer_message,
-                is_welcome=False,
-                custom_prompt=conversation_prompt
+                is_welcome=False
             )
             
             return response
@@ -437,15 +455,14 @@ Provide analysis in JSON format:
             )
             
             response = await self.ai_service.generate_conversation_response(
-                context={
+                conversation_context={
                     "branch": conversation.get("branch", "convincer"),
                     "products": [p.dict() for p in products],
                     "conversation_history": [msg.dict() for msg in history[-3:]],
                     "recovery_mode": True
                 },
                 customer_message=customer_message,
-                is_welcome=False,
-                custom_prompt=recovery_prompt
+                is_welcome=False
             )
             
             return response
@@ -473,7 +490,7 @@ Provide analysis in JSON format:
             )
             
             response = await self.ai_service.generate_conversation_response(
-                context={
+                conversation_context={
                     "branch": conversation.get("branch", "convincer"),
                     "original_products": [p.dict() for p in original_products],
                     "alternative_products": [p.dict() for p in alternative_products],
@@ -481,8 +498,7 @@ Provide analysis in JSON format:
                     "cross_recommendation": True
                 },
                 customer_message=customer_message,
-                is_welcome=False,
-                custom_prompt=cross_product_prompt
+                is_welcome=False
             )
             
             return response
@@ -505,7 +521,7 @@ Provide analysis in JSON format:
             
             # Search for products in different categories
             alternative_keywords = ["alternative", "different", "other"]
-            matches = await self.product_service.search_products_by_tags(alternative_keywords, threshold=0.1)
+            matches = await self.product_service.search_products_by_keywords(alternative_keywords, threshold=0.1)
             
             # Filter out products from same categories
             alternatives = []
@@ -572,15 +588,14 @@ Provide analysis in JSON format:
             
             # Generate conclusion message
             conclusion_message = await self.ai_service.generate_conversation_response(
-                context={
+                conversation_context={
                     "final_status": final_status.value,
                     "products_discussed": [p.dict() for p in products_discussed],
                     "conversation_history": [msg.dict() for msg in history[-3:]],
                     "conclusion": True
                 },
                 customer_message="",
-                is_welcome=False,
-                custom_prompt=conclusion_prompt
+                is_welcome=False
             )
             
             # Store conclusion message
